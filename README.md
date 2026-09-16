@@ -1,6 +1,12 @@
 # LUNAR
 
-LUNAR is an AI-powered assistant with a graphical user interface (GUI) and avatar representation.
+LUNAR is an advanced, AI-powered Operating System automation assistant featuring a sleek Graphical User Interface (GUI) and an interactive virtual avatar. Built entirely to run locally utilizing the Ollama framework (e.g., `qwen2.5-coder:7b`), it serves as a privacy-focused copilot that helps manage your computer seamlessly.
+
+With LUNAR, you can control your desktop through natural language conversations. Its core capabilities include:
+- **OS Automation:** Executing native shell commands for file and directory management.
+- **Application Control:** Launching desktop applications (e.g., VS Code, Chrome, Calculator) instantly.
+- **Web Navigation:** Opening specific websites and platforms directly in your default browser.
+- **Autonomous Typing:** Typing text directly into whichever desktop window currently has focus using `pyautogui`.
 
 ## Structure
 - `assistant.py`: Core logic for the assistant.
