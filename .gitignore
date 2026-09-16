@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+
+# Build
+dist/
+build/
+*.spec
+
+# LUNAR specific
+LUNAR_OUTPUT/
+
+# Environment
+.venv/
+venv/
+env/
+.env
+
+# Images/Media
+*.png
+*.jpg
+*.jpeg
