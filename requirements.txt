@@ -1,0 +1,4 @@
+pyautogui
+customtkinter
+ollama
+Pillow
