@@ -20,3 +20,4 @@ env/
 *.png
 *.jpg
 *.jpeg
+!bot_avatar.png
