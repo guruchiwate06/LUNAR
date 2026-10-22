@@ -1,123 +1,68 @@
-import os
-import platform
-import subprocess
-import json
-import time
-import webbrowser
+"""
+LUNAR - Dedicated Windowed GUI Assistant
+CustomTkinter desktop interface with thread-safe inference,
+GUI security confirmations, and system automation.
+"""
+
 import threading
-import pyautogui
+import tkinter.messagebox as mb
 import customtkinter as ctk
 import ollama
 
-MODEL_NAME = "qwen2.5-coder:7b"
-pyautogui.FAILSAFE = True
+from lunar_core import (
+    MODEL_NAME,
+    TOOL_SCHEMAS,
+    check_ollama_health,
+    parse_tool_call,
+    dispatch_tool_call,
+    fast_match_intent,
+    clean_display_text,
+    extract_fallback_tool_from_text,
+    logger
+)
 
-# --- SYSTEM TOOL SCHEMAS ---
-tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "execute_command",
-            "description": "Executes shell commands (mkdir, dir, ls, etc.).",
-            "parameters": {
-                "type": "object",
-                "properties": {"command": {"type": "string"}},
-                "required": ["command"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "launch_app",
-            "description": "Launches desktop applications (Notepad, VS Code, Chrome, etc.).",
-            "parameters": {
-                "type": "object",
-                "properties": {"app_name": {"type": "string"}},
-                "required": ["app_name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "open_website",
-            "description": "Opens URLs directly in the web browser.",
-            "parameters": {
-                "type": "object",
-                "properties": {"url": {"type": "string"}},
-                "required": ["url"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "type_in_active_window",
-            "description": "Types text into the active window using PyAutoGUI.",
-            "parameters": {
-                "type": "object",
-                "properties": {"text": {"type": "string"}},
-                "required": ["text"]
-            }
-        }
-    }
-]
-
-# --- TOOL IMPLEMENTATIONS ---
-def run_shell_command(cmd):
-    try:
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
-        return res.stdout if res.stdout else (res.stderr if res.stderr else "Done.")
-    except Exception as e:
-        return f"Error: {e}"
-
-def launch_application(app):
-    sys_name = platform.system()
-    app_lower = app.lower().strip()
-    try:
-        if sys_name == "Windows":
-            apps = {"notepad": "notepad.exe", "calc": "calc.exe", "vs code": "code", "code": "code", "chrome": "start chrome"}
-            subprocess.Popen(apps.get(app_lower, app_lower), shell=True)
-        elif sys_name == "Darwin":
-            subprocess.Popen(["open", "-a", app])
-        else:
-            subprocess.Popen([app], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return f"Launched {app}."
-    except Exception as e:
-        return f"Launch failed: {e}"
-
-def open_web_page(url):
-    target = url if url.startswith("http") else f"https://{url}"
-    webbrowser.open(target)
-    return f"Opened {target}"
-
-def type_text(text):
-    time.sleep(2)
-    pyautogui.write(text, interval=0.04)
-    pyautogui.press('enter')
-    return f"Typed: {text}"
-
-# --- DESKTOP WIDGET UI CLASS ---
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
+
 
 class FloatingAssistantWidget(ctk.CTk):
     def __init__(self):
         super().__init__()
 
+        self.is_running = True
+        self.is_processing = False
+
         # Window Configurations
         self.title("LUNAR")
-        self.geometry("380x520+1000+150") # Width x Height + X_pos + Y_pos
-        self.attributes("-topmost", True)  # Always stay on top of other apps
-        self.overrideredirect(False)       # Standard modern borders
+        self.geometry("400x560+950+120")
+        self.attributes("-topmost", True)
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        # Top Bar Title
-        self.title_label = ctk.CTkLabel(self, text="LUNAR WELCOMES YOU!", font=("Segoe UI", 14, "bold"))
-        self.title_label.pack(pady=(10, 5))
+        # Header Title
+        self.title_label = ctk.CTkLabel(
+            self,
+            text="🌙 LUNAR Copilot",
+            font=("Segoe UI", 15, "bold")
+        )
+        self.title_label.pack(pady=(10, 2))
 
-        # Chat Area Scrollable
-        self.chat_area = ctk.CTkTextbox(self, width=350, height=390, corner_radius=10, font=("Segoe UI", 12))
+        # Status Badge
+        self.status_label = ctk.CTkLabel(
+            self,
+            text="Checking system status...",
+            font=("Segoe UI", 10),
+            text_color="#9CA3AF"
+        )
+        self.status_label.pack(pady=(0, 6))
+
+        # Chat Area
+        self.chat_area = ctk.CTkTextbox(
+            self,
+            width=370,
+            height=410,
+            corner_radius=10,
+            font=("Segoe UI", 11)
+        )
         self.chat_area.pack(padx=10, pady=5)
         self.chat_area.configure(state="disabled")
 
@@ -125,101 +70,205 @@ class FloatingAssistantWidget(ctk.CTk):
         self.input_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.input_frame.pack(fill="x", padx=10, pady=(5, 10))
 
-        self.entry = ctk.CTkEntry(self.input_frame, placeholder_text="HUKUM MERE AAKA...", width=270)
+        self.entry = ctk.CTkEntry(
+            self.input_frame,
+            placeholder_text="Enter your command or request...",
+            width=290,
+            font=("Segoe UI", 11)
+        )
         self.entry.pack(side="left", padx=(0, 5))
         self.entry.bind("<Return>", lambda event: self.send_message())
 
-        self.send_btn = ctk.CTkButton(self.input_frame, text="Send", width=65, command=self.send_message)
+        self.send_btn = ctk.CTkButton(
+            self.input_frame,
+            text="Send",
+            width=65,
+            command=self.send_message
+        )
         self.send_btn.pack(side="right")
 
-        # Chat Memory
+        # Chat History
         self.messages = [{
-    "role": "system",
-    "content": "Your name is LUNAR, a desktop OS assistant widget. Execute system, file, browser, and typing tasks via tools when requested."
-}]
+            "role": "system",
+            "content": (
+                "Your name is LUNAR, a desktop OS assistant. Execute system, file, browser, "
+                "and typing tasks via tools when requested. Keep answers direct and concise."
+            )
+        }]
 
-    def append_chat(self, sender, text):
+        # Perform async health check on launch
+        threading.Thread(target=self.run_startup_check, daemon=True).start()
+
+    def on_close(self):
+        """Safely terminates the GUI and cancels any background tasks."""
+        self.is_running = False
+        self.destroy()
+
+    def run_startup_check(self):
+        """Pre-flight check for Ollama and model presence."""
+        is_ready, msg = check_ollama_health(MODEL_NAME)
+        if not self.is_running:
+            return
+        if is_ready:
+            self.after(0, lambda: self.set_status("● Ready", "#10B981"))
+        else:
+            self.after(0, lambda: self.set_status("⚠️ Ollama Offline", "#EF4444"))
+            self.after(0, lambda: self.append_chat("System", f"Notice: {msg}"))
+
+    def append_chat(self, sender: str, text: str):
+        """Thread-safe UI chat append."""
+        if not self.is_running:
+            return
         self.chat_area.configure(state="normal")
         self.chat_area.insert("end", f"{sender}: {text}\n\n")
         self.chat_area.see("end")
         self.chat_area.configure(state="disabled")
 
+    def set_status(self, text: str, color: str = "#9CA3AF"):
+        """Thread-safe status update."""
+        if not self.is_running:
+            return
+        self.status_label.configure(text=text, text_color=color)
+
+    def set_busy(self, is_busy: bool):
+        """Updates UI interactive state during model generation."""
+        if not self.is_running:
+            return
+        self.is_processing = is_busy
+        if is_busy:
+            self.send_btn.configure(state="disabled", text="⏳")
+            self.entry.configure(state="disabled")
+            self.set_status("⏳ Thinking...", "#F59E0B")
+        else:
+            self.send_btn.configure(state="normal", text="Send")
+            self.entry.configure(state="normal")
+            self.set_status("● Ready", "#10B981")
+
+    def gui_confirm(self, action_desc: str, details: str) -> bool:
+        """Thread-safe modal confirmation dialog invoked from background worker."""
+        if not self.is_running:
+            return False
+
+        result = [False]
+        done_event = threading.Event()
+
+        def ask():
+            try:
+                if self.is_running:
+                    ans = mb.askyesno(
+                        title="LUNAR Security Authorization",
+                        message=f"LUNAR requests permission to:\n\n{action_desc}\n\nTarget:\n{details}\n\nAuthorize this operation?",
+                        parent=self
+                    )
+                    result[0] = bool(ans)
+            except Exception as e:
+                logger.error(f"Confirmation dialog error: {e}")
+                result[0] = False
+            finally:
+                done_event.set()
+
+        self.after(0, ask)
+        done_event.wait(timeout=60)
+        return result[0]
+
     def send_message(self):
+        """Submits user text to the processing worker."""
+        if self.is_processing:
+            return
+
         user_text = self.entry.get().strip()
         if not user_text:
             return
 
+        self.set_busy(True)
         self.entry.delete(0, "end")
         self.append_chat("You", user_text)
+
+        # 1. Fast Path: Instant launch for common app & web navigation commands
+        fast_tool, fast_args = fast_match_intent(user_text)
+        if fast_tool and fast_args:
+            target_desc = fast_args.get("app_name", fast_args.get("url", fast_tool))
+            self.set_status(f"⚡ Launching {target_desc}...", "#3B82F6")
+
+            def run_fast():
+                try:
+                    result = dispatch_tool_call(fast_tool, fast_args, confirm_callback=self.gui_confirm)
+                    if self.is_running:
+                        self.after(0, lambda: self.append_chat("Assistant", f"✓ {result}"))
+                        self.messages.append({"role": "user", "content": user_text})
+                        self.messages.append({"role": "assistant", "content": result})
+                except Exception as err:
+                    logger.error(f"Fast execution error: {err}")
+                    if self.is_running:
+                        self.after(0, lambda: self.append_chat("Error", f"Error: {str(err)}"))
+                finally:
+                    if self.is_running:
+                        self.after(0, lambda: self.set_busy(False))
+
+            threading.Thread(target=run_fast, daemon=True).start()
+            return
+
+        # 2. General Local LLM Inference Path
+        self.append_chat("System", "⏳ LUNAR is processing your request...")
         self.messages.append({"role": "user", "content": user_text})
 
-        # Process in thread so GUI doesn't freeze during LLM inference
-        threading.Thread(target=self.process_ai_request).start()
-
-    def extract_fallback_tool(self, content):
-        try:
-            if "{" in content and "}" in content:
-                s = content.find("{")
-                e = content.rfind("}") + 1
-                data = json.loads(content[s:e])
-                return data.get("name"), data.get("arguments", data.get("parameters", {}))
-        except Exception:
-            pass
-        return None, None
+        threading.Thread(target=self.process_ai_request, daemon=True).start()
 
     def process_ai_request(self):
+        """Background worker handling model inference and tool calling."""
         try:
-            response = ollama.chat(model=MODEL_NAME, messages=self.messages, tools=tools)
-            response_msg = response["message"]
+            # Bound context history for speed on CPU (system prompt + last 6 messages)
+            context = [self.messages[0]] + self.messages[-6:] if len(self.messages) > 7 else self.messages
+
+            response = ollama.chat(
+                model=MODEL_NAME,
+                messages=context,
+                tools=TOOL_SCHEMAS,
+                options={"temperature": 0.1, "num_predict": 256}
+            )
+
+            if not self.is_running:
+                return
+
+            response_msg = response.get("message", {})
             self.messages.append(response_msg)
 
-            tool_name = None
-            tool_args = {}
+            # Parse tool calls safely
+            tool_name, tool_args = parse_tool_call(response_msg)
 
-            # Parse tool calls
-            if response_msg.get("tool_calls"):
-                call = response_msg["tool_calls"][0]["function"]
-                tool_name = call["name"]
-                tool_args = call["arguments"]
-            elif response_msg.get("content"):
-                tool_name, tool_args = self.extract_fallback_tool(response_msg["content"])
+            if tool_name and tool_args is not None:
+                self.after(0, lambda: self.set_status(f"⚡ Running {tool_name}...", "#3B82F6"))
 
-            # Execute Tool Action
-            if tool_name:
-                result = ""
-                if tool_name == "execute_command":
-                    cmd = tool_args.get("command")
-                    self.after(0, lambda: self.append_chat("System", f"Running command: `{cmd}`"))
-                    result = run_shell_command(cmd)
+                # Execute with GUI confirmation
+                result = dispatch_tool_call(tool_name, tool_args, confirm_callback=self.gui_confirm)
 
-                elif tool_name == "launch_app":
-                    app = tool_args.get("app_name")
-                    self.after(0, lambda: self.append_chat("System", f"Launching: {app}"))
-                    result = launch_application(app)
-
-                elif tool_name == "open_website":
-                    url = tool_args.get("url")
-                    self.after(0, lambda: self.append_chat("System", f"Opening: {url}"))
-                    result = open_web_page(url)
-
-                elif tool_name == "type_in_active_window":
-                    txt = tool_args.get("text")
-                    self.after(0, lambda: self.append_chat("System", f"Typing in 2s: '{txt}'"))
-                    result = type_text(txt)
-
-                self.messages.append({"role": "tool", "content": result})
-
-                # Follow-up response
-                final_res = ollama.chat(model=MODEL_NAME, messages=self.messages)
-                bot_text = final_res["message"]["content"]
-                self.messages.append(final_res["message"])
-                self.after(0, lambda: self.append_chat("Assistant", bot_text))
-
+                if self.is_running:
+                    self.after(0, lambda: self.append_chat("Assistant", f"✓ {result}"))
+                    self.messages.append({"role": "assistant", "content": result})
             else:
-                self.after(0, lambda: self.append_chat("Assistant", response_msg["content"]))
+                reply = response_msg.get("content", "").strip()
+
+                # Check if raw JSON tool call leaked into content
+                fallback_tool, fallback_args = extract_fallback_tool_from_text(reply)
+                if fallback_tool and fallback_args:
+                    self.after(0, lambda: self.set_status(f"⚡ Running {fallback_tool}...", "#3B82F6"))
+                    result = dispatch_tool_call(fallback_tool, fallback_args, confirm_callback=self.gui_confirm)
+                    if self.is_running:
+                        self.after(0, lambda: self.append_chat("Assistant", f"✓ {result}"))
+                        self.messages.append({"role": "assistant", "content": result})
+                else:
+                    clean_reply = clean_display_text(reply)
+                    if self.is_running:
+                        self.after(0, lambda: self.append_chat("Assistant", clean_reply if clean_reply else "Task completed."))
 
         except Exception as err:
-            self.after(0, lambda: self.append_chat("Error", str(err)))
+            logger.error(f"Inference error in GUI: {err}")
+            if self.is_running:
+                self.after(0, lambda: self.append_chat("Error", f"Error: {str(err)}"))
+        finally:
+            if self.is_running:
+                self.after(0, lambda: self.set_busy(False))
+
 
 if __name__ == "__main__":
     app = FloatingAssistantWidget()

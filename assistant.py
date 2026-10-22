@@ -1,259 +1,120 @@
-import os
-import platform
-import subprocess
-import json
-import time
-import webbrowser
-import pyautogui
+"""
+LUNAR - CLI Assistant Mode
+Command-line interface with human-in-the-loop approvals,
+safety checks, and local Ollama automation.
+"""
+
+import sys
 import ollama
+from lunar_core import (
+    MODEL_NAME,
+    TOOL_SCHEMAS,
+    check_ollama_health,
+    parse_tool_call,
+    dispatch_tool_call,
+    fast_match_intent,
+    clean_display_text,
+    extract_fallback_tool_from_text,
+    logger
+)
 
-MODEL_NAME = "qwen2.5-coder:7b"
 
-# Enable PyAutoGUI fail-safe: move mouse to any screen corner to stop execution
-pyautogui.FAILSAFE = True
-
-# Define tool schemas for Ollama
-tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "execute_command",
-            "description": "Executes a native system shell command (e.g., mkdir, touch, dir, ls) for file or directory management.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "The exact OS shell command to run."
-                    }
-                },
-                "required": ["command"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "launch_app",
-            "description": "Launches a desktop application executable (e.g., Notepad, VS Code, Chrome, Calculator).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "app_name": {
-                        "type": "string",
-                        "description": "Common name of the app (e.g., 'notepad', 'code', 'chrome', 'calc')."
-                    }
-                },
-                "required": ["app_name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "open_website",
-            "description": "Opens a web URL or platform directly in the browser (e.g., YouTube, Google).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "The full website URL or platform name (e.g., 'https://www.youtube.com')."
-                    }
-                },
-                "required": ["url"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "type_in_active_window",
-            "description": "Types text directly into whichever desktop window or application currently has focus using PyAutoGUI.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "The string to type out into the active text area."
-                    }
-                },
-                "required": ["text"]
-            }
-        }
-    }
-]
-
-# --- TOOL IMPLEMENTATIONS ---
-
-def run_shell_command(command: str) -> str:
-    print(f"\n[Action Request]: Execute Shell Command -> {command}")
-    confirm = input("Allow execution? (y/n): ").strip().lower()
-    if confirm != 'y':
-        return "Execution cancelled by user."
-
+def cli_confirm(action_desc: str, details: str) -> bool:
+    """Prompts the user in the terminal for explicit authorization."""
+    print(f"\n🛡️  [Action Authorization Required]")
+    print(f"Action:  {action_desc}")
+    print(f"Details: {details}")
     try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
-        output = result.stdout if result.stdout else result.stderr
-        return output if output else "Command executed successfully with no terminal output."
-    except Exception as e:
-        return f"Shell execution error: {str(e)}"
+        confirm = input("Allow execution? (y/N): ").strip().lower()
+        return confirm == "y"
+    except (KeyboardInterrupt, EOFError):
+        print("\nAction aborted.")
+        return False
 
-def launch_application(app_name: str) -> str:
-    print(f"\n[Action Request]: Launch Application -> {app_name}")
-    confirm = input(f"Allow opening '{app_name}'? (y/n): ").strip().lower()
-    if confirm != 'y':
-        return "Launch cancelled by user."
-
-    system = platform.system()
-    app = app_name.lower().strip()
-
-    try:
-        if system == "Windows":
-            win_apps = {
-                "notepad": "notepad.exe",
-                "calculator": "calc.exe",
-                "calc": "calc.exe",
-                "vs code": "code",
-                "vscode": "code",
-                "code": "code",
-                "chrome": "start chrome",
-                "edge": "start msedge"
-            }
-            target = win_apps.get(app, app)
-            subprocess.Popen(target, shell=True)
-
-        elif system == "Darwin":  # macOS
-            mac_apps = {"vs code": "Visual Studio Code", "vscode": "Visual Studio Code"}
-            target = mac_apps.get(app, app)
-            subprocess.Popen(["open", "-a", target])
-
-        else:  # Linux
-            subprocess.Popen([app], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-        return f"Application '{app_name}' launched."
-    except Exception as e:
-        return f"Failed to launch '{app_name}': {str(e)}"
-
-def open_web_page(url: str) -> str:
-    print(f"\n[Action Request]: Web Navigation -> {url}")
-    target_url = url.strip()
-    if not target_url.startswith("http://") and not target_url.startswith("https://"):
-        target_url = f"https://{target_url}"
-
-    try:
-        webbrowser.open(target_url)
-        return f"Opened browser and navigated to {target_url}."
-    except Exception as e:
-        return f"Failed to open browser: {str(e)}"
-
-def type_text(text: str) -> str:
-    print(f"\n[Action Request]: PyAutoGUI Typing -> '{text}'")
-    print("Focus your target window now! Typing begins in 2 seconds...")
-    time.sleep(2)
-
-    try:
-        pyautogui.write(text, interval=0.04)
-        pyautogui.press('enter')
-        return f"Successfully typed '{text}' into the focused window."
-    except Exception as e:
-        return f"GUI typing error: {str(e)}"
-
-# --- PARSING AND ROUTING ---
-
-def extract_tool_from_text(text: str):
-    """Fallback JSON parser if model outputs raw tool call JSON inside content."""
-    try:
-        if "{" in text and "}" in text:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            json_str = text[start:end]
-            data = json.loads(json_str)
-            
-            name = data.get("name")
-            args = data.get("arguments", data.get("parameters", {}))
-
-            if name == "execute_command":
-                return "execute_command", args.get("command")
-            if name == "launch_app":
-                return "launch_app", args.get("app_name")
-            if name == "open_website":
-                return "open_website", args.get("url")
-            if name == "type_in_active_window":
-                return "type_in_active_window", args.get("text")
-    except Exception:
-        pass
-    return None, None
-
-def dispatch_tool(tool_type: str, arg: str) -> str:
-    if tool_type == "execute_command":
-        return run_shell_command(arg)
-    elif tool_type == "launch_app":
-        return launch_application(arg)
-    elif tool_type == "open_website":
-        return open_web_page(arg)
-    elif tool_type == "type_in_active_window":
-        return type_text(arg)
-    return "Unknown tool type."
-
-# --- MAIN ASSISTANT LOOP ---
 
 def start_assistant():
-    print("=== Integrated Local OS Assistant Initialized ===")
-    
+    print("=" * 55)
+    print("🌙 LUNAR — Local Neural Automation & Robotics Copilot")
+    print("Mode: Terminal / CLI")
+    print("Type 'exit' or 'quit' to close.")
+    print("=" * 55)
+
+    # Pre-flight health check
+    is_ready, health_msg = check_ollama_health(MODEL_NAME)
+    print(f"Status: {health_msg}\n")
+    if not is_ready:
+        print("⚠️  Warning: Ollama service issue detected. LUNAR may not generate responses until resolved.\n")
+
     system_prompt = (
-        "You are an OS automation agent. Perform tasks using tools:\n"
-        "- Use 'execute_command' for shell files/folders.\n"
-        "- Use 'launch_app' to launch local software executables.\n"
-        "- Use 'open_website' for navigating to websites or web platforms like YouTube.\n"
-        "- Use 'type_in_active_window' to type keyboard text into active windows."
+        "You are LUNAR, an autonomous local OS copilot. Execute system, file, browser, "
+        "and typing actions using tools when requested. Keep answers direct and concise."
     )
-    
     messages = [{"role": "system", "content": system_prompt}]
 
     while True:
-        user_input = input("\nYou: ")
-        if user_input.lower() in ["exit", "quit"]:
+        try:
+            user_input = input("\nYou: ").strip()
+            if not user_input:
+                continue
+
+            if user_input.lower() in ["exit", "quit"]:
+                print("Goodbye!")
+                break
+
+            # 1. Fast Path for direct app launch or web navigation
+            fast_tool, fast_args = fast_match_intent(user_input)
+            if fast_tool and fast_args:
+                result = dispatch_tool_call(fast_tool, fast_args, confirm_callback=cli_confirm)
+                print(f"\nAssistant: {result}")
+                messages.append({"role": "user", "content": user_input})
+                messages.append({"role": "assistant", "content": result})
+                continue
+
+            # 2. General LLM Inference Path
+            messages.append({"role": "user", "content": user_input})
+            context = [messages[0]] + messages[-6:] if len(messages) > 7 else messages
+
+            print("⏳ Thinking...")
+            try:
+                response = ollama.chat(
+                    model=MODEL_NAME,
+                    messages=context,
+                    tools=TOOL_SCHEMAS,
+                    options={"temperature": 0.1, "num_predict": 256}
+                )
+            except Exception as e:
+                print(f"\n❌ Ollama Error: {str(e)}")
+                print("Make sure Ollama is running ('ollama serve') and the model is pulled.")
+                continue
+
+            response_msg = response.get("message", {})
+            messages.append(response_msg)
+
+            # Parse tool calls safely
+            tool_name, tool_args = parse_tool_call(response_msg)
+
+            if tool_name and tool_args is not None:
+                tool_result = dispatch_tool_call(tool_name, tool_args, confirm_callback=cli_confirm)
+                print(f"\nAssistant: {tool_result}")
+                messages.append({"role": "assistant", "content": f"Action result: {tool_result}"})
+            else:
+                reply = response_msg.get("content", "").strip()
+                fallback_tool, fallback_args = extract_fallback_tool_from_text(reply)
+                if fallback_tool and fallback_args:
+                    tool_result = dispatch_tool_call(fallback_tool, fallback_args, confirm_callback=cli_confirm)
+                    print(f"\nAssistant: {tool_result}")
+                    messages.append({"role": "assistant", "content": f"Action result: {tool_result}"})
+                else:
+                    clean_reply = clean_display_text(reply)
+                    print(f"\nAssistant: {clean_reply if clean_reply else 'Task completed.'}")
+
+        except (KeyboardInterrupt, EOFError):
+            print("\nExiting LUNAR CLI.")
             break
+        except Exception as e:
+            logger.error(f"Unexpected CLI error: {e}")
+            print(f"\nError: {str(e)}")
 
-        messages.append({"role": "user", "content": user_input})
-
-        response = ollama.chat(model=MODEL_NAME, messages=messages, tools=tools)
-        response_msg = response["message"]
-        messages.append(response_msg)
-
-        tool_type = None
-        tool_arg = None
-
-        # 1. Check native tool calls from Ollama
-        if response_msg.get("tool_calls"):
-            for call in response_msg["tool_calls"]:
-                tool_type = call["function"]["name"]
-                args = call["function"]["arguments"]
-                
-                if tool_type == "execute_command":
-                    tool_arg = args.get("command")
-                elif tool_type == "launch_app":
-                    tool_arg = args.get("app_name")
-                elif tool_type == "open_website":
-                    tool_arg = args.get("url")
-                elif tool_type == "type_in_active_window":
-                    tool_arg = args.get("text")
-
-        # 2. Fallback check for raw JSON inside text content
-        if not tool_type and response_msg.get("content"):
-            tool_type, tool_arg = extract_tool_from_text(response_msg["content"])
-
-        # Run tool if extracted
-        if tool_type and tool_arg:
-            tool_result = dispatch_tool(tool_type, tool_arg)
-            messages.append({"role": "tool", "content": tool_result})
-
-            final_response = ollama.chat(model=MODEL_NAME, messages=messages)
-            print(f"\nAssistant: {final_response['message']['content']}")
-            messages.append(final_response["message"])
-        else:
-            print(f"\nAssistant: {response_msg['content']}")
 
 if __name__ == "__main__":
     start_assistant()

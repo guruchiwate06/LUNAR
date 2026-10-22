@@ -1,23 +1,39 @@
-# Python
+# Python bytecode and caches
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
 
-# Build
+# Build artifacts
 dist/
 build/
 *.spec
+*.egg-info/
 
-# LUNAR specific
+# LUNAR specific output
 LUNAR_OUTPUT/
+*.log
 
-# Environment
+# Virtual Environments
 .venv/
 venv/
 env/
+ENV/
 .env
 
-# Images/Media
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Media assets & sprites
 *.png
 *.jpg
 *.jpeg
-!bot_avatar.png
+!sprite_sheet.png
+!sprites_preview.png
+!sprites/*.png
+
+# Local user runtime config
+pet_position.json

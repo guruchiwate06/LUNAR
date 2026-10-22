@@ -1,19 +1,16 @@
 <div align="center">
 
-<img src="bot_avatar.png" alt="LUNAR Avatar" width="180" />
-
 # 🌙 LUNAR
 
-**Local Universal Neural Automation & Robotics Assistant**
+**Local Universal Neural Automation & Robotics Copilot**
 
-*A privacy-first, fully local AI desktop copilot with an interactive floating avatar, built on Ollama and CustomTkinter.*
+*A local-first, privacy-respecting AI desktop assistant with an animated floating astronaut mascot, built on Ollama, CustomTkinter, and PyAutoGUI.*
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Ollama](https://img.shields.io/badge/Ollama-Local%20LLM-black.svg)](https://ollama.com/)
 [![CustomTkinter](https://img.shields.io/badge/UI-CustomTkinter-blueviolet.svg)](https://customtkinter.tomschimansky.com/)
-[![Cross-Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)]()
-[![Privacy](https://img.shields.io/badge/Privacy-100%25%20Offline-success.svg)]()
-[![License](https://img.shields.io/badge/License-MIT-green.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-47%20Passed-success.svg)]()
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ---
 
@@ -21,45 +18,66 @@
 
 ## 📖 Overview
 
-**LUNAR** is an autonomous, privacy-focused Operating System assistant designed to bridge natural language instructions with direct OS automation. Running 100% locally via the [Ollama](https://ollama.com/) engine (using models like `qwen2.5-coder:7b`), LUNAR requires zero external API keys and never sends telemetry or sensitive desktop data to third-party clouds.
+**LUNAR** is a local-first desktop automation copilot that connects natural language instructions to direct operating system actions. Powered by local LLMs via [Ollama](https://ollama.com/) (default: `qwen2.5-coder:7b`), LUNAR runs locally without sending your desktop activities, typed text, or conversation history to external third-party cloud APIs.
 
-Whether you prefer a minimalist terminal interface, a dedicated windowed dashboard, or a futuristic floating desktop avatar that lives on your screen, LUNAR provides seamless desktop automation at your fingertips.
-
----
-
-## ✨ Key Features
-
-- 🤖 **Interactive Standing Avatar Widget**:
-  - Always-on-top, borderless floating avatar that sits in the corner of your screen.
-  - Transparent background support on Windows.
-  - Click to toggle the chat drawer; drag-and-drop to position anywhere on your desktop.
-- 🖥️ **Full Graphical Dashboard**:
-  - Dark-mode GUI crafted with `CustomTkinter`.
-  - Non-blocking asynchronous threaded inference prevents UI freezing during complex model generation.
-- ⚡ **Autonomous OS Tool Calling**:
-  - **Shell Command Execution (`execute_command`)**: Native system commands for folder and file manipulation (`mkdir`, `dir`, `ls`, etc.).
-  - **App Launcher (`launch_app`)**: Opens system applications (VS Code, Chrome, Notepad, Calculator, Edge, etc.) across Windows, macOS, and Linux.
-  - **Web Navigation (`open_website`)**: Instantly launches and navigates to URLs or popular platforms in your default browser.
-  - **Synthetic Typing (`type_in_active_window`)**: Simulates realistic human keystrokes directly into active target windows using `pyautogui`.
-- 🔒 **Safety & Failsafes**:
-  - **PyAutoGUI Failsafe**: Slam the mouse cursor into any corner of your monitor to instantly abort automated mouse/keyboard actions.
-  - **Human-in-the-Loop Safeguard**: CLI mode prompts for explicit user confirmation before executing native shell commands or launching binaries.
-  - **Resilient Function Parsing**: Handles both Ollama native structured tool calls and raw JSON output fallbacks.
+LUNAR offers three flexible interfaces:
+1. **Animated Floating Desktop Pet (PyQt6)**: A borderless, draggable, cartoon moon-robot that floats on your desktop with per-pixel alpha transparency, physics bobbing, autonomous blinking/looking/turning, and sleep/wake cycles.
+2. **Dedicated Windowed GUI**: A standalone dark-mode desktop application built with `CustomTkinter`.
+3. **Terminal / CLI Mode**: A command-line interface with interactive authorization prompts.
 
 ---
 
-## 🏛️ Project Architecture
+## 🏛️ Architecture & Project Structure
+
+The codebase is built with a centralized security and tool-execution core (`lunar_core.py`) shared by all user interfaces:
 
 ```
 LUNAR/
-├── bot_avatar.png           # Avatar asset for standing desktop widget
-├── assistant.py             # CLI mode with human-in-the-loop approvals
-├── gui_assistant.py         # Dedicated CustomTkinter windowed app
-├── lunar_avatar_widget.py   # Floating desktop avatar with expandable chat
-├── requirements.txt         # Core Python dependencies
-├── .gitignore               # Git ignore patterns for clean version control
-└── README.md                # Documentation and project manual
+├── lunar_core.py            # Central security validation, dynamic app resolution, & Ollama engine
+├── assistant.py             # Mode 1: Interactive CLI with terminal authorization
+├── gui_assistant.py         # Mode 2: CustomTkinter windowed desktop application
+├── pet.py                   # Mode 3: PyQt6 animated desktop pet widget (per-pixel transparency)
+├── lunar_desktop_pet.py     # Desktop pet launcher entry point (calls pet.py)
+├── prepare_sprites.py       # Sprite splitter, background removal, & 512x512 canvas pipeline
+├── requirements.txt         # Core dependencies with version constraints
+├── start_pet.bat            # Silent background launcher
+├── PET_README.md            # Desktop pet user manual & Windows startup setup
+├── .gitignore               # Clean repository exclusions (pycache, pytest, venvs, local configs)
+├── LUNAR.spec               # PyInstaller build specification
+├── sprite_sheet.png         # Source cartoon moon-robot sprite sheet
+├── sprites_preview.png      # 8-pose cutout quality preview grid
+├── sprites/                 # 8 standardized transparent 512x512 PNG sprites
+├── tests/                   # Automated pytest test suite (47 passed)
+│   ├── test_validation.py      # URL, typing, and command safety validation tests
+│   ├── test_tool_execution.py  # Subprocess, timeout, dynamic discovery, and injection prevention
+│   ├── test_parsing.py         # Tool call extraction and fallback JSON parsing tests
+│   ├── test_ollama.py          # Ollama health checks and error recovery tests
+│   ├── test_fast_intent.py     # Deterministic zero-lag intent matching tests
+│   └── test_concurrency.py     # Thread synchronization and request locking tests
+└── README.md                # Comprehensive documentation and manual
 ```
+
+---
+
+## 🛡️ Security & Safeguards
+
+LUNAR interacts directly with the operating system, which requires strict defensive safeguards:
+
+1. **Strictly Blocked Dangerous Commands**:
+   - Destructive commands such as disk formatting (`format`, `mkfs`), recursive forced root deletion (`rm -rf /`, `rmdir /s`), malicious download pipes (`curl ... | bash`), and encoded PowerShell payloads are strictly blocked before execution.
+2. **Human-in-the-Loop Confirmation**:
+   - **CLI Mode**: Prompts the user with `Allow execution? (y/N)` before executing shell actions or launching applications.
+   - **GUI & Avatar Modes**: Uses thread-safe modal confirmation dialogs on the main UI thread to authorize sensitive or destructive actions before execution.
+3. **Command Injection Prevention**:
+   - Application launching validates targets against known app mappings and clean identifier formats, avoiding unsafe `shell=True` argument concatenation.
+4. **URL & Scheme Whitelisting**:
+   - Web navigation strictly permits only `http://` and `https://` URLs with valid hostnames. Prohibited protocols (`file:///`, `javascript:`, `data:`, `ms-*`) are rejected.
+5. **Fail-Safe Synthetic Typing**:
+   - PyAutoGUI screen-corner fail-safe is enabled: slamming the mouse cursor into any screen corner immediately aborts typing.
+   - Includes a 2-second buffer delay to focus the target window, text validation, and a clipboard fallback for non-ASCII keyboard layouts.
+6. **Execution Timeouts & Error Codes**:
+   - Shell commands enforce a 30-second timeout to prevent hanging processes.
+   - Non-zero process exit codes and stderr are reported to the user without falsely claiming success.
 
 ---
 
@@ -67,116 +85,115 @@ LUNAR/
 
 ### 1. Prerequisites
 
-1. **Python 3.10+**: Ensure Python is installed and added to your `PATH`.
-2. **Ollama**: Download and install Ollama from [ollama.com](https://ollama.com/).
-3. **Pull the AI Model**:
-   LUNAR is optimized for `qwen2.5-coder:7b` for precise tool calling, but works with any Ollama model supporting function calling.
-   ```bash
-   ollama pull qwen2.5-coder:7b
-   ```
-4. **Start the Ollama Server**:
-   Ensure Ollama is running in the background:
-   ```bash
-   ollama serve
-   ```
+* **Python 3.10+**: Ensure Python is installed and accessible in your terminal.
+* **Ollama**: Download and install from [ollama.com](https://ollama.com/).
+* **Pull the Model**:
+  ```powershell
+  ollama pull qwen2.5-coder:7b
+  ```
+  *(For lower-spec systems running without a dedicated GPU, `qwen2.5-coder:1.5b` or `qwen2.5:3b` can be used for significantly faster CPU inference).*
+* **Start Ollama**:
+  ```powershell
+  ollama serve
+  ```
 
 ---
 
 ### 2. Installation
 
 1. **Clone the repository:**
-   ```bash
+   ```powershell
    git clone https://github.com/guruchiwate06/LUNAR.git
    cd LUNAR
    ```
 
 2. **Create and activate a virtual environment:**
-   - **Windows:**
+   * **Windows:**
      ```powershell
      python -m venv venv
      .\venv\Scripts\activate
      ```
-   - **macOS / Linux:**
+   * **macOS / Linux:**
      ```bash
      python3 -m venv venv
      source venv/bin/activate
      ```
 
 3. **Install dependencies:**
-   ```bash
+   ```powershell
    pip install -r requirements.txt
    ```
 
 ---
 
-## 🎮 Usage Modes
-
-LUNAR can be launched in three different interfaces depending on your workflow:
+## 🎮 Launch Modes
 
 ### Mode 1: Floating Desktop Avatar (Recommended)
-Launches the persistent, interactive desktop mascot in the bottom-right corner of your screen. Click the avatar to expand the conversation drawer, or drag it anywhere.
+Launches the persistent desktop mascot in the bottom-right corner of your screen. Click the avatar to toggle the chat drawer; drag it anywhere on your desktop.
 
-```bash
+```powershell
 python lunar_avatar_widget.py
 ```
 
 ### Mode 2: Dedicated Windowed GUI
-Launches a standalone windowed CustomTkinter desktop interface with conversation logging.
+Launches the standalone windowed CustomTkinter desktop interface with real-time status indicators.
 
-```bash
+```powershell
 python gui_assistant.py
 ```
 
 ### Mode 3: Terminal / CLI Mode
-Launches a command-line interface with interactive safety confirmations (`y/n`) before executing shell operations.
+Launches the terminal copilot with interactive authorization prompts.
 
-```bash
+```powershell
 python assistant.py
 ```
 
 ---
 
-## 🛠️ Tool Calling Capabilities
+## 🧪 Automated Testing
 
-| Tool | Trigger Intent | Example Prompts |
-|---|---|---|
-| `execute_command` | Filesystem & Shell tasks | *"Create a folder named ProjectAlpha and list files"* |
-| `launch_app` | System Applications | *"Open VS Code"*, *"Launch calculator"* |
-| `open_website` | Web Browsing | *"Go to github.com"*, *"Open YouTube"* |
-| `type_in_active_window` | Keystroke simulation | *"Type 'Hello World' in my editor"* |
+LUNAR includes a comprehensive automated test suite covering command validation, tool execution, injection prevention, Ollama health checking, tool call parsing, and concurrency synchronization:
 
----
-
-## ⚙️ Configuration & Model Customization
-
-To change the underlying model, update `MODEL_NAME` at the top of the respective script:
-
-```python
-MODEL_NAME = "qwen2.5-coder:7b"  # e.g., "llama3.1:8b", "mistral-nemo", "phi3"
+```powershell
+python -m pytest -v tests/
 ```
 
-Make sure the selected model has been pulled locally (`ollama pull <model_name>`).
+All 40 unit test cases mock external processes, Ollama responses, and desktop typing to ensure safe, deterministic execution without modifying your desktop.
 
 ---
 
-## 🛡️ Safety & Fail-Safe Tips
+## 🌐 Supported Operating Systems & Limitations
 
-- **Emergency Exit**: If automated typing or mouse movements run wild, move your mouse cursor aggressively to **any of the four screen corners**. PyAutoGUI fail-safe will abort execution immediately.
-- **Focus Delay**: When triggering `type_in_active_window`, LUNAR provides a **2-second delay buffer** before starting to type, allowing you to click into your target input field or document.
+| Feature / OS | Windows | macOS | Linux |
+|---|---|---|---|
+| **CLI Mode** | Fully Supported | Fully Supported | Fully Supported |
+| **Windowed GUI** | Fully Supported | Supported | Supported (X11 / Wayland) |
+| **Avatar Mascot** | Supported with Transparency | Supported (Dark Window Frame) | Supported (Dark Window Frame) |
+| **App Launcher** | Notepad, VS Code, Chrome, Edge, Calc | VS Code, Chrome, Safari, TextEdit | VS Code, Chrome, Firefox, Gedit |
+| **Synthetic Typing** | Supported (PyAutoGUI + Clipboard) | Supported (Accessibility permissions required) | Supported (X11; Wayland requires xdotool / uinput) |
+
+### Remaining Limitations & Considerations
+* **Local-First Privileges**: LUNAR runs with the permissions of the current logged-in user. It is not sandboxed in an isolated container; user confirmations are the primary defense against unauthorized actions.
+* **CPU vs GPU Inference**: When running without an NVIDIA GPU (`CUDA: False`), 7B models can take 10–25 seconds per query on CPU. For faster responses, use `qwen2.5-coder:1.5b`.
+* **Transparency**: Desktop transparency (`-transparentcolor`) is a Windows-specific Tkinter API. On macOS and Linux, the avatar window uses a styled dark slate background.
+* **macOS Keystroke Permissions**: macOS requires granting Accessibility permissions to your terminal or Python executable in *System Preferences > Privacy & Security > Accessibility* for PyAutoGUI typing to work.
 
 ---
 
-## 🤝 Contributing
+## 🔧 Troubleshooting
 
-Contributions, feature requests, and bug reports are welcome!
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+* **"Cannot connect to Ollama server"**:
+  Make sure Ollama is running in the background. Open a terminal and run `ollama serve`.
+* **"Model 'qwen2.5-coder:7b' not found"**:
+  Download the model by running `ollama pull qwen2.5-coder:7b`.
+* **PyAutoGUI Typing Interrupted**:
+  Moving the mouse cursor to any corner of your monitor activates the emergency fail-safe. Keep the mouse still or click into the target window during the 2-second buffer delay.
+* **CustomTkinter Appearance on Linux**:
+  If CustomTkinter throws display errors on headless or minimal Linux installations, ensure `python3-tk` and an active X11/Wayland display server are installed.
 
 ---
 
 ## 📄 License
 
-This project is open-source and available under the [MIT License](LICENSE).
+This project is licensed under the [MIT License](LICENSE).
